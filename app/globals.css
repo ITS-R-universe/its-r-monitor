@@ -1,9 +1,4 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-:root { --bg:#0a0a0f; --card:#0d1117; --border:#1e293b; --gold:#d4af37; --text:#e2e8f0; --muted:#94a3b8; }
-* { box-sizing:border-box; margin:0; padding:0; }
-body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; min-height:100vh; }
-::-webkit-scrollbar { width:5px; }
-::-webkit-scrollbar-track { background:var(--bg); }
-::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+body{background:#0a0a0f;color:#f8fafc;margin:0}
