@@ -1,164 +1,89 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
+export default function MonitorPage() {
+  const [data, setData] = useState<any>(null)
+  const [services, setServices] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+  const [filter, setFilter] = useState('all')
+  const [page, setPage] = useState(0)
+  const PER = 100
 
-interface StatusData {
-  summary: { total: number; up: number; down: number; degraded: number; unknown: number; uptime_percent: number }
-  services: ServiceStatus[]
-  last_checked: string
-}
+  async function loadAll() {
+    const all: any[] = []
+    let offset = 0
+    while(true) {
+      const r = await fetch(
+        (process.env.NEXT_PUBLIC_SUPABASE_URL||'') + '/rest/v1/its_r_services?select=id,name,url,status,category&limit=1000&offset='+offset+'&order=name.asc',
+        {headers:{apikey:process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY||'',Authorization:'Bearer '+(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY||'')}}
+      )
+      const d = await r.json()
+      if(!Array.isArray(d)||d.length===0) break
+      all.push(...d)
+      if(d.length<1000) break
+      offset+=1000
+    }
+    setServices(all)
+  }
 
-interface ServiceStatus {
-  id: string
-  service_name: string
-  service_url: string
-  status: 'up' | 'down' | 'degraded' | 'unknown'
-  response_time_ms: number | null
-  status_code: number | null
-  checked_at: string
-  category: string
-}
+  async function runCheck() {
+    setLoading(true)
+    try { const r=await fetch('/api/check'); setData(await r.json()); await loadAll() } catch(e){}
+    setLoading(false)
+  }
 
-const STATUS_CONFIG = {
-  up: { color: '#34d399', bg: 'rgba(52,211,153,0.1)', border: 'rgba(52,211,153,0.2)', label: 'Operational', dot: '#34d399' },
-  down: { color: '#f87171', bg: 'rgba(239,68,68,0.1)', border: 'rgba(239,68,68,0.2)', label: 'Down', dot: '#f87171' },
-  degraded: { color: '#fbbf24', bg: 'rgba(251,191,36,0.1)', border: 'rgba(251,191,36,0.2)', label: 'Degraded', dot: '#fbbf24' },
-  unknown: { color: '#94a3b8', bg: 'rgba(100,116,139,0.1)', border: 'rgba(100,116,139,0.2)', label: 'Unknown', dot: '#64748b' },
-}
+  useEffect(()=>{ loadAll(); const t=setInterval(runCheck,60000); return()=>clearInterval(t) },[])
 
-export default function Monitor() {
-  const [data, setData] = useState<StatusData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [lastRefresh, setLastRefresh] = useState(new Date())
-  const [nextRefresh, setNextRefresh] = useState(60)
+  const filtered=services.filter(s=>filter==='all'||s.status===filter)
+  const pages=Math.ceil(filtered.length/PER)
+  const shown=filtered.slice(page*PER,(page+1)*PER)
+  const sc:Record<string,string>={live:'#22c55e',down:'#ef4444',coming_soon:'#f59e0b',planned:'#6366f1',pending:'#94a3b8'}
+  const counts:Record<string,number>={}
+  services.forEach(s=>{counts[s.status]=(counts[s.status]||0)+1})
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch('/api/status')
-      if (res.ok) { setData(await res.json()); setLastRefresh(new Date()) }
-    } catch { /* silent */ } finally { setLoading(false) }
-  }, [])
-
-  useEffect(() => {
-    load()
-    const interval = setInterval(load, 60000)
-    const countdown = setInterval(() => setNextRefresh(n => n <= 1 ? 60 : n - 1), 1000)
-    return () => { clearInterval(interval); clearInterval(countdown) }
-  }, [load])
-
-  const allUp = data?.summary.uptime_percent === 100
-  const allDown = data && data.summary.down === data.summary.total
-
-  return (
-    <div style={{ minHeight: '100vh', background: '#0a0a0f' }}>
-      <header style={{ borderBottom: '1px solid #1e293b', background: 'rgba(13,17,23,0.9)', backdropFilter: 'blur(12px)', position: 'sticky', top: 0, zIndex: 50, padding: '0 1.5rem' }}>
-        <div style={{ maxWidth: 900, margin: '0 auto', height: 60, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 22 }}>👁️</span>
-            <span style={{ color: '#d4af37', fontWeight: 800, fontSize: 18 }}>ITS-R Monitor</span>
+  return(
+    <div style={{maxWidth:'1400px',margin:'0 auto',padding:'2rem'}}>
+      <div style={{textAlign:'center',marginBottom:'2rem'}}>
+        <h1 style={{fontSize:'2rem',fontWeight:'bold'}}><span style={{color:'#d4af37'}}>ITS-R</span> Monitor</h1>
+        <p style={{color:'#94a3b8',fontSize:'0.875rem'}}>Real-time status — All {services.length||2213} services</p>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:'0.75rem',marginBottom:'1.5rem'}}>
+        {Object.entries({Total:services.length,Live:counts.live||0,Down:counts.down||0,'Coming Soon':counts.coming_soon||0,Planned:counts.planned||0}).map(([k,v])=>(
+          <div key={k} style={{background:'#0d1117',border:'1px solid #1e293b',borderRadius:'0.5rem',padding:'0.75rem',textAlign:'center'}}>
+            <div style={{fontSize:'1.5rem',fontWeight:'bold',color:k==='Live'?'#22c55e':k==='Down'?'#ef4444':'#d4af37'}}>{v}</div>
+            <div style={{color:'#94a3b8',fontSize:'0.7rem'}}>{k}</div>
           </div>
-          <div style={{ color: '#475569', fontSize: 12 }}>Refresh in {nextRefresh}s</div>
-        </div>
-      </header>
-
-      <main style={{ maxWidth: 900, margin: '0 auto', padding: '3rem 1.5rem' }}>
-        {/* Overall Status Banner */}
-        {!loading && data && (
-          <div style={{ background: allUp ? 'rgba(52,211,153,0.08)' : allDown ? 'rgba(239,68,68,0.08)' : 'rgba(251,191,36,0.08)', border: `1px solid ${allUp ? 'rgba(52,211,153,0.2)' : allDown ? 'rgba(239,68,68,0.2)' : 'rgba(251,191,36,0.2)'}`, borderRadius: 16, padding: '24px 28px', marginBottom: 32, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <div style={{ width: 16, height: 16, borderRadius: '50%', background: allUp ? '#34d399' : allDown ? '#f87171' : '#fbbf24', boxShadow: `0 0 12px ${allUp ? '#34d399' : allDown ? '#f87171' : '#fbbf24'}` }} />
-              <div>
-                <div style={{ color: allUp ? '#34d399' : allDown ? '#f87171' : '#fbbf24', fontWeight: 700, fontSize: 20 }}>
-                  {allUp ? 'All Systems Operational' : allDown ? 'Major Outage' : 'Partial Outage'}
-                </div>
-                <div style={{ color: '#64748b', fontSize: 13, marginTop: 2 }}>
-                  Last updated: {lastRefresh.toLocaleTimeString()}
-                </div>
-              </div>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 36, fontWeight: 800, color: allUp ? '#34d399' : '#fbbf24' }}>{data.summary.uptime_percent.toFixed(1)}%</div>
-              <div style={{ color: '#64748b', fontSize: 12 }}>Uptime</div>
+        ))}
+      </div>
+      <div style={{textAlign:'center',marginBottom:'1rem'}}>
+        <button onClick={runCheck} disabled={loading} style={{background:'#d4af37',color:'#0a0a0f',padding:'0.5rem 1.5rem',borderRadius:'0.5rem',border:'none',fontWeight:'bold',cursor:'pointer'}}>
+          {loading?'⏳ Checking...':'🔍 Check Now'}
+        </button>
+        {data&&<p style={{color:'#94a3b8',fontSize:'0.75rem',marginTop:'0.5rem'}}>{data.checked} checked | {data.live} live | {data.down} down | {data.ms}ms</p>}
+      </div>
+      <div style={{display:'flex',gap:'0.375rem',flexWrap:'wrap',marginBottom:'1rem'}}>
+        {['all','live','down','coming_soon','planned'].map(f=>(
+          <button key={f} onClick={()=>{setFilter(f);setPage(0)}} style={{padding:'0.25rem 0.625rem',borderRadius:'0.25rem',border:'1px solid #1e293b',background:filter===f?'#d4af37':'#0d1117',color:filter===f?'#0a0a0f':'#94a3b8',cursor:'pointer',fontSize:'0.75rem'}}>
+            {f.replace('_',' ')} ({f==='all'?services.length:counts[f]||0})
+          </button>
+        ))}
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))',gap:'0.375rem',marginBottom:'1rem'}}>
+        {shown.map(s=>(
+          <div key={s.id} style={{background:'#0d1117',border:'1px solid #1e293b',borderRadius:'0.375rem',padding:'0.5rem',display:'flex',alignItems:'center',gap:'0.375rem'}}>
+            <div style={{width:'7px',height:'7px',borderRadius:'50%',background:sc[s.status]||'#94a3b8',flexShrink:0}}/>
+            <div style={{minWidth:0,flex:1}}>
+              <div style={{color:'#f8fafc',fontSize:'0.75rem',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={s.name}>{s.name.replace('ITS-R-','')}</div>
+              <div style={{color:'#64748b',fontSize:'0.65rem'}}>{s.category}</div>
             </div>
           </div>
-        )}
-
-        {/* Stats */}
-        {!loading && data && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 32 }}>
-            {[
-              { label: 'Total Monitored', val: data.summary.total, color: '#e2e8f0' },
-              { label: 'Operational', val: data.summary.up, color: '#34d399' },
-              { label: 'Down', val: data.summary.down, color: '#f87171' },
-              { label: 'Unknown', val: data.summary.unknown, color: '#94a3b8' },
-            ].map(s => (
-              <div key={s.label} style={{ background: '#0d1117', border: '1px solid #1e293b', borderRadius: 12, padding: '16px 20px', textAlign: 'center' }}>
-                <div style={{ fontSize: 28, fontWeight: 800, color: s.color }}>{s.val}</div>
-                <div style={{ color: '#64748b', fontSize: 12, marginTop: 4 }}>{s.label}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Services List */}
-        <div style={{ background: '#0d1117', border: '1px solid #1e293b', borderRadius: 16, overflow: 'hidden' }}>
-          <div style={{ padding: '20px 24px', borderBottom: '1px solid #1e293b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2 style={{ color: '#e2e8f0', fontWeight: 700, fontSize: 18 }}>Service Status</h2>
-            <button onClick={load} style={{ padding: '7px 16px', background: 'transparent', border: '1px solid #1e293b', color: '#94a3b8', borderRadius: 8, cursor: 'pointer', fontSize: 13 }}>
-              ↻ Refresh
-            </button>
-          </div>
-
-          {loading ? (
-            Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} style={{ padding: '18px 24px', borderBottom: '1px solid rgba(30,41,59,0.5)', background: 'rgba(30,41,59,0.1)', height: 60 }} />
-            ))
-          ) : data && data.services.length === 0 ? (
-            <div style={{ padding: '48px 24px', textAlign: 'center', color: '#64748b' }}>
-              <div style={{ fontSize: 40, marginBottom: 12 }}>📡</div>
-              <p>No services monitored yet. Waiting for first cron run...</p>
-            </div>
-          ) : (
-            data?.services.map(svc => {
-              const cfg = STATUS_CONFIG[svc.status]
-              return (
-                <div key={svc.id} style={{ padding: '16px 24px', borderBottom: '1px solid rgba(30,41,59,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: cfg.dot, flexShrink: 0, boxShadow: svc.status === 'up' ? `0 0 6px ${cfg.dot}` : 'none' }} />
-                    <div>
-                      <div style={{ color: '#e2e8f0', fontWeight: 500, fontSize: 15 }}>{svc.service_name}</div>
-                      <div style={{ color: '#475569', fontSize: 12, marginTop: 2 }}>{svc.category}</div>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-                    {svc.response_time_ms !== null && (
-                      <span style={{ color: svc.response_time_ms < 500 ? '#34d399' : svc.response_time_ms < 2000 ? '#fbbf24' : '#f87171', fontSize: 13, fontFamily: 'monospace' }}>
-                        {svc.response_time_ms}ms
-                      </span>
-                    )}
-                    {svc.status_code && (
-                      <span style={{ color: '#475569', fontSize: 12, fontFamily: 'monospace' }}>{svc.status_code}</span>
-                    )}
-                    <span style={{ padding: '4px 12px', borderRadius: 100, fontSize: 12, fontWeight: 600, background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>
-                      {cfg.label}
-                    </span>
-                  </div>
-                </div>
-              )
-            })
-          )}
-        </div>
-
-        {data?.last_checked && (
-          <p style={{ textAlign: 'center', color: '#334155', fontSize: 12, marginTop: 20 }}>
-            Last cron check: {new Date(data.last_checked).toLocaleString()}
-          </p>
-        )}
-      </main>
-
-      <footer style={{ borderTop: '1px solid #1e293b', padding: '2rem', textAlign: 'center' }}>
-        <p style={{ color: '#475569', fontSize: 14 }}>ITS-R Universe</p>
-        <p style={{ color: '#334155', fontSize: 12, marginTop: 4 }}>In loving memory of Roshan Ali Sahab</p>
-      </footer>
+        ))}
+      </div>
+      {pages>1&&<div style={{display:'flex',justifyContent:'center',gap:'0.5rem',alignItems:'center'}}>
+        <button onClick={()=>setPage(p=>Math.max(0,p-1))} disabled={page===0} style={{padding:'0.375rem 0.75rem',background:'#0d1117',border:'1px solid #1e293b',color:'#f8fafc',borderRadius:'0.25rem',cursor:'pointer'}}>←</button>
+        <span style={{color:'#94a3b8',fontSize:'0.8rem'}}>Page {page+1}/{pages} — {filtered.length} services</span>
+        <button onClick={()=>setPage(p=>Math.min(pages-1,p+1))} disabled={page===pages-1} style={{padding:'0.375rem 0.75rem',background:'#0d1117',border:'1px solid #1e293b',color:'#f8fafc',borderRadius:'0.25rem',cursor:'pointer'}}>→</button>
+      </div>}
+      <div style={{textAlign:'center',marginTop:'2rem',color:'#64748b',fontSize:'0.7rem'}}>ITS-R Universe — In loving memory of Roshan Ali Sahab 🤲</div>
     </div>
   )
 }
