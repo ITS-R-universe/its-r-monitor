@@ -1,0 +1,26 @@
+name: Monitor + Deploy
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '*/5 * * * *'
+jobs:
+  ping-monitor:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - name: Trigger Monitor Check
+        run: curl -s https://its-r-monitor.vercel.app/api/check || true
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      - run: npm install -g vercel@latest
+      - run: vercel deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }} --scope=${{ secrets.VERCEL_ORG_ID }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
